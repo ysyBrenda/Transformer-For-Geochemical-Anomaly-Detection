@@ -10,8 +10,7 @@ if isCustomData==1:
     ALL_posNUM=2000
 else:
     ALL_posNUM=200
-__author__ = "Yu-Hsiang Huang"
-isChange_dmodel=0
+
 
 
 def get_pad_mask(seq, pad_idx):
@@ -77,47 +76,37 @@ class Encoder(nn.Module):
     ''' A encoder model with self attention mechanism. '''
 
     def __init__(
-            self, n_src_vocab, d_word_vec, n_layers, n_head, d_k, d_v,
-            d_model, d_inner, pad_idx, dropout=0.1, n_position=ALL_posNUM, scale_emb=False):
+            self, d_word_vec, n_layers, n_head, d_k, d_v,
+            d_model, d_inner, pad_idx, dropout=0.1, n_position=ALL_posNUM,):
 
         super().__init__()
 
-        self.src_word_emb = nn.Embedding(n_src_vocab, d_word_vec, padding_idx=pad_idx)
         self.position_enc = PositionalEncoding_my(d_word_vec, n_position=n_position)
         self.dropout = nn.Dropout(p=dropout)
         self.layer_stack = nn.ModuleList([
             EncoderLayer(d_model, d_inner, n_head, d_k, d_v, dropout=dropout)
             for _ in range(n_layers)])
         self.layer_norm = nn.LayerNorm(d_model, eps=1e-6)
-        self.scale_emb = scale_emb
+
         self.d_model = d_model
-        if isCustomData ==1:
-            self.data_prj= nn.Linear(in_features=38,out_features=d_word_vec, bias=False)  #512， n_trg_vocab=1585
+
+        self.data_prj= nn.Linear(in_features=38,out_features=d_word_vec, bias=False)  #512， n_trg_vocab=1585
 
     def forward(self, src_seq, src_mask, return_attns=False):
 
         enc_slf_attn_list = []
 
         # -- Forward
-        if isCustomData==0:
-            enc_output = self.src_word_emb(src_seq) #通过embedding算法，将单词向量化。（batchsize,n)==>(batchsize,n.512).n为序列长度，eg34
-        if self.d_model==38:
-            enc_output = src_seq
-        else:
-            # 加一层映射
-            pos, src_seq = src_seq[:, :, 0:2], src_seq[:, :, 2:]
-            enc_output = self.data_prj(src_seq)
-            enc_output = torch.cat((pos, enc_output), 2)
+        # enc_output = self.data_prj(src_seq)
+        enc_output = src_seq
+
 
         POSE,pe,x=self.position_enc(enc_output)
-        # draw_atten_func.draw_PE(pe)  # draw the positon encoding
-        # draw_atten_func.draw_PE(x,head='x')
-        # draw_atten_func.draw_PE(POSE, head='pe+x')
         enc_output = self.dropout(POSE)
         enc_output = self.layer_norm(enc_output)
 
         for enc_layer in self.layer_stack:
-            enc_output, enc_slf_attn = enc_layer(enc_output, slf_attn_mask=src_mask)  #todo bug enc_output=256,30,512=b,len,d_model encslf=258,8,30,30=b,nhead,len,len
+            enc_output, enc_slf_attn = enc_layer(enc_output, slf_attn_mask=src_mask)
             enc_slf_attn_list += [enc_slf_attn] if return_attns else []
 
         if return_attns:
@@ -129,19 +118,18 @@ class Decoder(nn.Module):
     ''' A decoder model with self attention mechanism. '''
 
     def __init__(
-            self, n_trg_vocab, d_word_vec, n_layers, n_head, d_k, d_v,
-            d_model, d_inner, pad_idx, n_position=ALL_posNUM, dropout=0.1, scale_emb=False):
+            self, d_word_vec, n_layers, n_head, d_k, d_v,
+            d_model, d_inner, pad_idx, n_position=ALL_posNUM, dropout=0.1):
 
         super().__init__()
 
-        self.trg_word_emb = nn.Embedding(n_trg_vocab, d_word_vec, padding_idx=pad_idx)
         self.position_enc = PositionalEncoding_my(d_word_vec, n_position=n_position)
         self.dropout = nn.Dropout(p=dropout)
         self.layer_stack = nn.ModuleList([
             DecoderLayer(d_model, d_inner, n_head, d_k, d_v, dropout=dropout)
             for _ in range(n_layers)])
         self.layer_norm = nn.LayerNorm(d_model, eps=1e-6)
-        self.scale_emb = scale_emb
+
         self.d_model = d_model
         if isCustomData == 1:
             self.data_prj = nn.Linear(in_features=38, out_features=d_word_vec, bias=False)  # 512， n_trg_vocab=1585
@@ -150,13 +138,8 @@ class Decoder(nn.Module):
 
         dec_slf_attn_list, dec_enc_attn_list = [], []
 
-        if isChange_dmodel==1:
-            # 加一层映射
-            pos, trg_seq = trg_seq[:, :, 0:2], trg_seq[:, :, 2:]
-            dec_output = self.data_prj(trg_seq)
-            dec_output=torch.cat((pos, dec_output), 2)
-        else:
-            dec_output=trg_seq
+
+        dec_output=trg_seq
 
         # -- Forward
         # train时，标注数据和enc_output作为decoder输入，在测试时，上一时刻的decoder输出 和enc_output 作为下一时刻的decoder输入。
@@ -165,26 +148,23 @@ class Decoder(nn.Module):
         dec_output = self.layer_norm(dec_output)
 
         for dec_layer in self.layer_stack:
-            #进入decoder层，enc_output用于cross-attention，输出dec-output作为下层的输入
             dec_output, dec_slf_attn, dec_enc_attn = dec_layer(
                 dec_output, enc_output, slf_attn_mask=trg_mask, dec_enc_attn_mask=src_mask)
             dec_slf_attn_list += [dec_slf_attn] if return_attns else []
             dec_enc_attn_list += [dec_enc_attn] if return_attns else []
 
         if return_attns:
-            #调试或可视化使用
             return dec_output, dec_slf_attn_list, dec_enc_attn_list
-        return dec_output,
+        return dec_output
 
 
-class Transformer(nn.Module):   #ysy 整个模型
+class Transformer(nn.Module):
     ''' A sequence to sequence model with attention mechanism. '''
 
     def __init__(
-            self, n_src_vocab, n_trg_vocab, src_pad_idx, trg_pad_idx,
+            self,  src_pad_idx, trg_pad_idx,
             d_word_vec=512, d_model=512, d_inner=2048,
             n_layers=6, n_head=8, d_k=64, d_v=64, dropout=0.1, n_position=ALL_posNUM,
-            trg_emb_prj_weight_sharing=True, emb_src_trg_weight_sharing=True,
             scale_emb_or_prj='prj'):
 
         super().__init__()
@@ -202,25 +182,23 @@ class Transformer(nn.Module):   #ysy 整个模型
         #   'none': no multiplication
 
         assert scale_emb_or_prj in ['emb', 'prj', 'none']
-        scale_emb = (scale_emb_or_prj == 'emb') if trg_emb_prj_weight_sharing else False
-        self.scale_prj = (scale_emb_or_prj == 'prj') if trg_emb_prj_weight_sharing else False
+        self.scale_prj = (scale_emb_or_prj == 'prj')
         self.d_model = d_model
 
         self.encoder = Encoder(
-            n_src_vocab=n_src_vocab, n_position=n_position,
+            n_position=n_position,
             d_word_vec=d_word_vec, d_model=d_model, d_inner=d_inner,
             n_layers=n_layers, n_head=n_head, d_k=d_k, d_v=d_v,
-            pad_idx=src_pad_idx, dropout=dropout, scale_emb=scale_emb)           #n_src_vocab=1585;   d_word_vec=512
+            pad_idx=src_pad_idx, dropout=dropout)
 
         self.decoder = Decoder(
-            n_trg_vocab=n_trg_vocab, n_position=n_position,
+            n_position=n_position,
             d_word_vec=d_word_vec, d_model=d_model, d_inner=d_inner,
             n_layers=n_layers, n_head=n_head, d_k=d_k, d_v=d_v,
-            pad_idx=trg_pad_idx, dropout=dropout, scale_emb=scale_emb)
+            pad_idx=trg_pad_idx, dropout=dropout)
 
-        self.trg_word_prj = nn.Linear(d_model, n_trg_vocab, bias=False)  #512， n_trg_vocab=1585
-        if isCustomData==1:
-            self.trg_out_prj  = nn.Linear(d_model, 38, bias=False)  #512， n_trg_vocab=1585
+
+        self.trg_out_prj  = nn.Linear(d_model, 38, bias=False)  #512， n_trg_vocab=1585
         for p in self.parameters():
             if p.dim() > 1:
                 nn.init.xavier_uniform_(p)
@@ -229,12 +207,6 @@ class Transformer(nn.Module):   #ysy 整个模型
         'To facilitate the residual connections, \
          the dimensions of all module outputs shall be the same.'
 
-        if trg_emb_prj_weight_sharing:
-            # Share the weight between target word embedding & last dense layer
-            self.trg_word_prj.weight = self.decoder.trg_word_emb.weight      #1585*512
-
-        if emb_src_trg_weight_sharing:
-            self.encoder.src_word_emb.weight = self.decoder.trg_word_emb.weight    #1585*512
 
 
     def forward(self, src_seq, trg_seq):
@@ -250,14 +222,9 @@ class Transformer(nn.Module):   #ysy 整个模型
 
         enc_output,enc_slf_attn_list = self.encoder(src_seq, src_mask,return_attns=True)  #todo bug  *_
         dec_output, dec_slf_attn_list, dec_enc_attn_list= self.decoder(trg_seq, trg_mask, enc_output, src_mask,return_attns=True)
-        # if isCustomData == 0:
-        #     seq_logit = self.trg_word_prj(dec_output)  #dec_output=256,28,512=b,len,d_model;     seqlogit=256,28,9516
-        # else:
-        if isChange_dmodel==1:
-            #加一层映射
-            seq_logit = self.trg_out_prj(dec_output) # 1,1585,512 =b,len, d_model
-        else:
-            seq_logit=dec_output
+
+        seq_logit=dec_output
+
         if self.scale_prj:  #1
             seq_logit *= self.d_model ** -0.5
 

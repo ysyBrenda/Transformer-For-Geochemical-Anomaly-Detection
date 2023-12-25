@@ -2,9 +2,6 @@
 '''
 This script handles the training process.
 '''
-isCustomData = 1
-import draw_atten_func
-#  1：输入我们的自定义数据  0"：原始demo
 import argparse
 import math
 import time
@@ -18,118 +15,41 @@ import torch
 import torch.nn.functional as F
 import torch.optim as optim
 import OUTPUTeval
-# from torchtext.datasets import TranslationDataset
-
-import transformer.Constants as Constants
 from transformer.Models import Transformer
 from transformer.Optim import ScheduledOptim
 import torch.utils.data as Data
 # import scipy.io as io
-from torch.utils.data import Dataset, DataLoader, TensorDataset
+# from torch.utils.data import Dataset, DataLoader, TensorDataset
 
-isAdjmask = 0
-# isRandMask = 1
-# isContrastLoss=1
-
-__author__ = "Yu-Hsiang Huang"
-
-
-# to use tensorboard，在terminal中输入：
+# to use tensorboard，input following in terminal：
 # $ tensorboard --logdir=output --port 6006
 # if【was already in use】：lsof -i:6006， kill -9 PID
-def adj_mask3(x):
-    import pandas as pd
-    len = x.size(0)  # len=1585
-    adj = pd.read_csv("./data/adj1585_R10000.csv", header=None)
-    adj = adj.values
-    # for i in range(len):
-    #     index = np.where(adj[i, :] == 0)
-    #     x[i, index, :] = 1  #pad=1 use 1 padding
-
-    index = np.where(adj == 0)
-
-    batch_ind = torch.arange(len).unsqueeze(-1)
-    x = x[0:len, index]
-    return x
-
-
-def mask_data(data, device, unmask):
-    # unmask=500
-    b, len, d = data.size()
-    # unmask=int(1585*0.5)
-    unmask = random.randint(int(1585 * 0.8), 1585)  # default
-    shuffle_indices = torch.rand(b, len, device=device).argsort()  # b,
-    unmask_ind, mask_ind = shuffle_indices[:, :unmask], shuffle_indices[:, unmask:]
-    # 对应 batch 维度的索引：(b,1)
-    batch_ind = torch.arange(b, device=device).unsqueeze(-1)
-    # 利用先前生成的索引对 patches 进行采样，分为 mask 和 unmasked 两组
-    # mask_patches, unmask_patches = data[batch_ind, mask_ind], data[batch_ind, unmask_ind]
-    # data = unmask_patches
-    return data[batch_ind, unmask_ind]
-
-
-def adj_mask(x):
-    import pandas as pd
-    len = x.size(0)  # len=1585
-    adj = pd.read_csv("./data/adj1585_R50000.csv", header=None)
-    adj = adj.values
-    for i in range(len):
-        index = np.where(adj[i, :] == 0)
-        x[i, index, :] = 1  # pad=1 use 1 padding
-    return x
-
-
-def adj_mask2(data, device):
-    b, len, d = data.size()
-    index = torch.where(data.sum(dim=1) == 1)[0]
-    batch_ind = torch.arange(b, device=device).unsqueeze(-1)
-    data = data[batch_ind, data.sum(dim=2) != 0]
-    #
-    index = torch.where(data[:, :, 3] != 0)
-    index = index.long()  # bool 转01=
-
-    return data[batch_ind, index]
-    # return data
-
-
-def patch_src(src, pad_idx):
-    src = src.transpose(0, 1)  # type(src)=<class 'torch.Tensor'>
-    return src
-
-
-def patch_trg(trg, pad_idx):
-    trg = trg.transpose(0, 1)
-    trg, gold = trg[:, :-1], trg[:, 1:].contiguous().view(-1)  # trg取最后1-（n-1），gold取trg的拉直向量
-    return trg, gold
-
 
 def train_epoch(model, training_data, optimizer, opt, device, smoothing):
     ''' Epoch operation in training phase'''
     model.train()
     total_loss = 0
-
+    iter = 0
     desc = '  - (Training)   '
     for batch in tqdm(training_data, mininterval=2, desc=desc, leave=False):  # todo
         # prepare data
         if opt.isContrastLoss:
             temp= batch[0].to(device)
-            # b, len, d = temp.size()
-            # a=torch.split(temp,1585,dim=1)
             a = torch.chunk(temp, 3, dim=1)
             src_seq=torch.cat([a[0],a[1],a[2]],0)
         else:
-            src_seq = batch[0].to(device)  # batchsize在前
+            src_seq = batch[0].to(device)
 
         gold = batch[1][:, 2:].unsqueeze(1)
-        trg_seq, gold = map(lambda x: x.to(device), [batch[1].unsqueeze(1), gold.contiguous().view(-1)])  # 转置、拉直向量  # unsqueeze:将（b,40） 改为（b,1,40)
+        trg_seq, gold = map(lambda x: x.to(device), [batch[1].unsqueeze(1), gold.contiguous().view(-1)])  # transpose、unsqueeze vector
         if opt.isContrastLoss:
              trg_seq=torch.cat([trg_seq,trg_seq,trg_seq],0)
 
         # forward
         optimizer.zero_grad()
-        pred, *_ = model(src_seq, trg_seq)  # （6912/9216,9516）   256,33   256,36xailkjib
+        pred, *_ = model(src_seq, trg_seq)
 
-        # =============  contrast loss==========================
+        # backward and update parameters
         if opt.isContrastLoss:
             a = torch.chunk(pred, 3, dim=0)
             contras_loss = F.mse_loss(a[1].contiguous().view(-1), a[2].contiguous().view(-1), reduction='mean')
@@ -137,25 +57,58 @@ def train_epoch(model, training_data, optimizer, opt, device, smoothing):
         else:
             loss = F.mse_loss(pred.contiguous().view(-1), gold, reduction='mean')  # reduction="mean"
 
-        # backward and update parameters
-        # =====loss==========
-        # loss = F.mse_loss(pred.contiguous().view(-1), gold, reduction='mean')  # reduction="mean"
         loss.backward()
         optimizer.step_and_update_lr()
-        # print(loss.item())
-        # note keeping
         total_loss += loss.item()
-        # tqdm.write(loss.item())
+        iter += 1
+        # tqdm.write(str(loss.item()))
 
-    print('total_train loss:{} '.format(total_loss))
-    return loss
-
+    print('total_train loss:{},,average_train loss:{} '.format(total_loss,total_loss/optimizer.n_steps))
+    print('optimizer step:{},iter:{}'.format(optimizer.n_steps,iter))
+    return total_loss/optimizer.n_steps
 
 def eval_epoch(model, validation_data, device, opt):
+    ''' Epoch operation in evaluation phase '''
+    model.eval()
+    total_loss = 0
+    iter=0
+    desc = '  - (Validation) '
+    with torch.no_grad():
+        for batch in tqdm(validation_data, mininterval=2, desc=desc, leave=False):
+            if opt.isContrastLoss:
+                temp = batch[0].to(device)
+                a = torch.chunk(temp, 3, dim=1)
+                src_seq = torch.cat([a[0], a[1], a[2]], 0)
+            else:
+                src_seq = batch[0].to(device)
+            gold = batch[1][:, 2:].unsqueeze(1)
+            trg_seq, gold = map(lambda x: x.to(device), [batch[1].unsqueeze(1), gold.contiguous().view(-1)])
+            if opt.isContrastLoss:
+                trg_seq = torch.cat([trg_seq, trg_seq, trg_seq], 0)
+
+            # forward
+            pred, *_ = model(src_seq, trg_seq)
+
+            # =============  loss==========================
+            if opt.isContrastLoss:
+                a = torch.chunk(pred, 3, dim=0)
+                contras_loss = F.mse_loss(a[1].contiguous().view(-1), a[2].contiguous().view(-1), reduction='mean')
+                loss = F.mse_loss(a[0].contiguous().view(-1), gold, reduction='mean') + opt.lambda_con * contras_loss
+            else:
+                loss = F.mse_loss(pred.contiguous().view(-1), gold, reduction='mean')  # reduction="mean"
+
+            total_loss += loss.item()
+            iter +=1
+    print('total_val loss:{} ,average_val loss:{}'.format(total_loss,total_loss/iter))
+    print('iter:{}'.format(iter))
+    return total_loss/iter
+
+def eval_epoch1(model, validation_data, device, opt):
     ''' Epoch operation in evaluation phase '''
     isContrastLoss1=0
     model.eval()
     total_loss = 0
+    iter=0
     Trg_all = torch.zeros(1, 40)
     Pred_all = torch.zeros(1, 38)
     desc = '  - (Validation) '
@@ -167,15 +120,14 @@ def eval_epoch(model, validation_data, device, opt):
                 a = torch.chunk(temp, 3, dim=1)
                 src_seq = torch.cat([a[0], a[1], a[2]], 0)
             else:
-                src_seq = batch[0].to(device)  # batchsize在前
-
+                src_seq = batch[0].to(device)
             gold = batch[1][:, 2:].unsqueeze(1)
             trg_seq, gold = map(lambda x: x.to(device), [batch[1].unsqueeze(1), gold.contiguous().view(-1)])  # 转置、拉直向量  # unsqueeze:将（b,40） 改为（b,1,40)
             if isContrastLoss1:
                 trg_seq = torch.cat([trg_seq, trg_seq, trg_seq], 0)
 
             # forward
-            pred, *_ = model(src_seq, trg_seq)  # （6912/9216,9516）   256,33   256,36xailkjib
+            pred, *_ = model(src_seq, trg_seq)
 
             # =============  contrast loss==========================
             if isContrastLoss1:
@@ -192,19 +144,20 @@ def eval_epoch(model, validation_data, device, opt):
 
 
             Trg_all = torch.cat((Trg_all, trg_seq.squeeze(1).cpu()), 0)
-            # np.savetxt("Val_data.csv", np.column_stack((x, y, err_xy)), delimiter=",", header='gold,pred,err',
-            #            fmt="%.8f")
-            # note keeping
             total_loss += loss.item()
+            iter +=1
     print('total_val loss:{} '.format(total_loss))
-    return loss, Pred_all, Trg_all
+    # print('optimizer step:{}'.format(optimizer.n_steps))
+    # return total_loss/optimizer.n_steps
+    print('iter:{}'.format(iter))
+    return total_loss/iter,Pred_all,Trg_all
 
 
 def train(model, training_data, validation_data, optimizer, device, opt):
     """ Start training """
 
     # Use tensorboard to plot curves, e.g. perplexity, accuracy, learning rate
-    if opt.use_tb:  # O
+    if opt.use_tb:
         print("[Info] Use Tensorboard")
         from tensorboardX import SummaryWriter
         # from torch.utils.tensorboard import SummaryWriter
@@ -213,25 +166,23 @@ def train(model, training_data, validation_data, optimizer, device, opt):
     log_train_file = os.path.join(opt.output_dir, opt.fileHead, 'train.log')
     log_valid_file = os.path.join(opt.output_dir, opt.fileHead, 'valid.log')
 
-    print('[Info] Training performance will be written to file: {} and {}'.format(
-        log_train_file, log_valid_file))
+    print('[Info] Training performance will be written to file: {} and {}'.format(log_train_file, log_valid_file))
 
     with open(log_train_file, 'w') as log_tf, open(log_valid_file, 'w') as log_vf:
         log_tf.write('epoch,loss,lr\n')  # todo: add AUC
-        log_vf.write('epoch,loss,lr,auc\n')
+        log_vf.write('epoch,loss,lr\n')
 
     def print_performances(header, loss, start_time, lr):
-        print('  - {header:12} loss: {loss: 8.2e},  lr: {lr:8.2e}, ' \
+        print('  - {header:12} loss: {loss: 8.5f},  lr: {lr: 8.5f}, ' \
               'elapse: {elapse:3.3f} min'.format(
             header=f"({header})", loss=loss,
-            elapse=(time.time() - start_time) / 60, lr=lr))  # lr: {lr:8.5f}  5位小数
+            elapse=(time.time() - start_time) / 60, lr=lr))  # lr: {lr:8.5f}  8.2e
 
-    Auces = []
     valid_losses = []
     bad_counter = 0
     best = 50000
     patience = 5  # 5
-    for epoch_i in range(opt.epoch):  # 1个 epoch要算完所有数据。
+    for epoch_i in range(opt.epoch):
         print('[ Epoch', epoch_i, ']')
 
         start = time.time()
@@ -242,56 +193,33 @@ def train(model, training_data, validation_data, optimizer, device, opt):
         print_performances('Training', train_loss, start, lr)
 
         # start = time.time()
-        valid_loss, Pred, Trg, *_ = eval_epoch(model, validation_data, device, opt)  # todo
+        valid_loss = eval_epoch(model, validation_data, device, opt)  # todo
         print_performances('Validation', valid_loss, start, lr)
 
-        # =========画图，AUC计算============= #todo
-        Auc_i = OUTPUTeval.PlotAndAUC(Pred, Trg, epoch_i,train_loss=train_loss,valid_loss=valid_loss,head=opt.fileHead)  # pred tensor 1586,38     trg 1586,40
-
         valid_losses += [valid_loss]
-        Auces += [Auc_i]
 
         checkpoint = {'epoch': epoch_i, 'settings': opt, 'model': model.state_dict()}
 
         if opt.save_mode == 'all':
             # if epoch_i % 10 == 9:
-            model_name = 'output/' + opt.fileHead + '/model/model_{epoch:d}_vloss_{vloss:.4f}_auc_{auc:.4f}.chkpt'.format(
-                epoch=epoch_i, vloss=valid_loss, auc=Auc_i)
-            torch.save(checkpoint, model_name)
+            model_name = 'model_{epoch:d}_vloss_{vloss:.4f}.chkpt'.format(epoch=epoch_i, vloss=valid_loss)
+            torch.save(checkpoint, os.path.join(opt.output_dir, opt.fileHead, model_name))
         elif opt.save_mode == 'best':
-            if Auc_i >= max(Auces) and Auc_i > 0.880:
-                model_name = 'model_best_{epoch:d}_vloss_{vloss:.4f}_auc_{auc:.4f}.chkpt'.format(epoch=epoch_i,
-                                                                                                 vloss=valid_loss,
-                                                                                                 auc=Auc_i)
-                # model_name = 'model_best.chkpt'  # 'model.chkpt'
-                torch.save(checkpoint, os.path.join(opt.output_dir, opt.fileHead, model_name))
-                # torch.save(checkpoint, model_name)
-                # print(' - [Info] The checkpoint file has been updated.')
-
-                # #draw atten
-                # for l in range(0, len(dec_enc_attn_list)):  # n_Layer
-                #     for i in range(0, 2):
-                #         dec_enc_attn_list1 = dec_enc_attn_list[l].data
-                #         draw_atten_func.draw(dec_enc_attn_list1[i].unsqueeze(0), save_file_L=str(l + 1), point=str(i),
-                #                              head=opt.fileHead)
+            model_name = 'model_best.chkpt'
+            torch.save(checkpoint, os.path.join(opt.output_dir, opt.fileHead, model_name))
+            print(' - [Info] The checkpoint file has been updated.')
 
         with open(log_train_file, 'a') as log_tf, open(log_valid_file, 'a') as log_vf:
-            log_tf.write('{epoch},{loss: 8.5f},{lr:8.2e},{auc:8.5f}\n'.format(
-                epoch=epoch_i, loss=train_loss, lr=lr, auc=Auc_i))
-            log_vf.write('{epoch},{loss: 8.9f},{lr:8.2e},{auc:8.5f}\n'.format(
-                epoch=epoch_i, loss=valid_loss, lr=lr, auc=Auc_i))
+            log_tf.write('{epoch},{loss: 8.5f},{lr:8.5f}\n'.format(
+                epoch=epoch_i, loss=train_loss, lr=lr))
+            log_vf.write('{epoch},{loss: 8.5f},{lr:8.5f}\n'.format(
+                epoch=epoch_i, loss=valid_loss, lr=lr))
 
         if opt.use_tb:
             tb_writer.add_scalars('loss', {'train': train_loss, 'val': valid_loss}, epoch_i)
             tb_writer.add_scalar('learning_rate', lr, epoch_i)
-            tb_writer.add_scalar('auc', Auc_i, epoch_i)
-
-        # print('【best AUC：】',max(Auces))
-        print('   best AUC：{auc: 8.3f}, elapse: {elapse:3.3f} min'.format(auc=max(Auces),
-                                                                          elapse=(time.time() - start) / 60, lr=lr))
 
         # auto break
-
         if valid_loss < best:
             best = valid_loss
             bad_counter = 0
@@ -300,9 +228,9 @@ def train(model, training_data, validation_data, optimizer, device, opt):
         if bad_counter == patience:
             break
 
-    log_opt_file = 'gridsearch_July.log'  # add
+    log_opt_file = 'opt_file_log.log'  # add
     with open(log_opt_file, 'a') as log_f:
-        log_f.write(str(opt.fileHead) + '__{auc:8.5f}\n'.format(auc=max(Auces)))
+        log_f.write(str(opt.fileHead) + '__loss__{:8.5f}\n'.format(valid_loss))
 
 
 def main():
@@ -364,7 +292,7 @@ def main():
     opt.d_word_vec = opt.d_model  # 512
 
     # ------自动生成输出文件夹的名字----
-    opt.fileHead = 'shuffle0723_T' + str(opt.T) + '_pad1_unmask' + str(opt.unmask) + '_h' + str(opt.n_head) + 'L' + str(
+    opt.fileHead = 'test_T' + str(opt.T) + '_unmask' + str(opt.unmask) + '_h' + str(opt.n_head) + 'L' + str(
         opt.n_layers) + '_hid' + str(opt.d_inner_hid) + '_d' + str(opt.d_model) + '_b' + str(
         opt.batch_size) + '_warm' + str(opt.n_warmup_steps) + '_lrm' + str(opt.lr_mul) + '_seed' + \
                    str(opt.seed) + '_dr' + str(opt.dropout) +'_isCL'+str(opt.isContrastLoss)+ '_lamb'+str(opt.lambda_con) #+'_ismask'+str(opt.isRandMask)  # + '_l2'+str(opt.l2)
@@ -417,12 +345,10 @@ def main():
         log_f.write(str(opt))
 
     transformer = Transformer(
-        opt.src_vocab_size,  # 9516 ==>1585?
-        opt.trg_vocab_size,  # 9516
+        # opt.src_vocab_size,
+        # opt.trg_vocab_size,
         src_pad_idx=opt.src_pad_idx,  # 1
         trg_pad_idx=opt.trg_pad_idx,  # 1
-        trg_emb_prj_weight_sharing=opt.proj_share_weight,  # true
-        emb_src_trg_weight_sharing=opt.embs_share_weight,
         d_k=opt.d_k,
         d_v=opt.d_v,
         d_model=opt.d_model,
@@ -441,46 +367,38 @@ def main():
 
 
 def Rand_mask(x, seed,unmask):
-    if 0:  #固定mask：
+    if 0:  #fixed masking number
         len = x.size(0)  # len=1585
         random.seed(seed)
         torch.manual_seed(seed)
-        # unmask=random.randint(int(len*0.8),len)  #个数
-        unmask = int(len * 0.3)  # 先固定unmask个数
+        # unmask=random.randint(int(len*0.8),len)
+        unmask = int(len * 0.3)  # fix mask number
         shuffle_indices = torch.rand(len, len).argsort()  # b,
         unmask_ind, mask_ind = shuffle_indices[:, :unmask], shuffle_indices[:, unmask:]
-        # 对应 batch 维度的索引：(b,1)
         batch_ind = torch.arange(len).unsqueeze(-1)
-
         x[batch_ind, unmask_ind] = 1  # pad=1 use 1 padding
 
-    else: #随机mask
+    else: #ramdomly masking number
         len = x.size(0)  # len=1585
-        unmask = random.randint(int(len * unmask), len)  #个数
+        unmask = random.randint(int(len * unmask), len)  #number of mask
         random.seed(seed)
         torch.manual_seed(seed)
-        # unmask = int(len * 0.3)  # 先固定unmask个数
-        shuffle_indices = torch.rand(len, len).argsort()  # b,
+
+        shuffle_indices = torch.rand(len, len).argsort()
         unmask_ind, mask_ind = shuffle_indices[:, :unmask], shuffle_indices[:, unmask:]
-        # 对应 batch 维度的索引：(b,1)
         batch_ind = torch.arange(len).unsqueeze(-1)
-
         x[batch_ind, unmask_ind] = 1  # pad=1 use 1 padding
-
     return x
     # return x[batch_ind, unmask_ind]
 
-
 def prepare_dataloaders(opt, device):
     batch_size = opt.batch_size
-    pkldata = pickle.load(open(opt.data_pkl, 'rb'))  # './data/pre_data.pkl'
+    pkldata = pickle.load(open(opt.data_pkl, 'rb'))
     x = pkldata['x']
     y = pkldata['y']
     x = torch.FloatTensor(np.array(x))
     y = torch.FloatTensor(np.array(y))
 
-    # if isAdjmask:
-    #     x = adj_mask3(x)
 
     if opt.isRandMask:
         print("~~~RandMask~~~~!")
@@ -510,8 +428,8 @@ def prepare_dataloaders(opt, device):
     train_iterator = Data.DataLoader(
         dataset=train_torch_dataset,
         batch_size=batch_size,
-        shuffle=True,  # $TrueFalse
-        num_workers=2,  # pin_memory=True  放在GPU上
+        shuffle=True,
+        num_workers=2,  # pin_memory=True
         drop_last=True
     )
     val_iterator = Data.DataLoader(
@@ -520,15 +438,12 @@ def prepare_dataloaders(opt, device):
         shuffle=False,
         num_workers=2
     )
-    # for epoch in range(1):
-    #     for step, batch in enumerate(loader):
-    #         print("Epoch:", epoch, "|step:", step, "  |batch x:", batch[0].numpy(), "  |batch y:", batch[1].numpy())
 
-    opt.src_pad_idx = 1  # todo
+    opt.src_pad_idx = 1
     opt.trg_pad_idx = 1
 
-    opt.src_vocab_size = len(x)  # 1585
-    opt.trg_vocab_size = len(y)  # 1585
+    # opt.src_vocab_size = len(x)
+    # opt.trg_vocab_size = len(y)
 
     return train_iterator, val_iterator
 
