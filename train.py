@@ -1,12 +1,11 @@
-# ========= Yuhsuyan 0608 masked version ===========  #run in env:torch1.3.0   D=38.  add contrast loss
 '''
 This script handles the training process.
+author： ysyBrenda
+run in env:torch1.3.0
 '''
 import argparse
-import math
 import time
 import dill as pickle
-import numpy
 from tqdm import tqdm
 import numpy as np
 import random
@@ -14,19 +13,17 @@ import os
 import torch
 import torch.nn.functional as F
 import torch.optim as optim
-import OUTPUTeval
+
 from transformer.Models import Transformer
 from transformer.Optim import ScheduledOptim
 import torch.utils.data as Data
-# import scipy.io as io
-# from torch.utils.data import Dataset, DataLoader, TensorDataset
 
 # to use tensorboard，input following in terminal：
 # $ tensorboard --logdir=output --port 6006
 # if【was already in use】：lsof -i:6006， kill -9 PID
 
-def train_epoch(model, training_data, optimizer, opt, device, smoothing):
-    ''' Epoch operation in training phase'''
+def train_epoch(model, training_data, optimizer, opt, device):
+    ''' Epoch operation in training'''
     model.train()
     total_loss = 0
     iter = 0
@@ -63,12 +60,11 @@ def train_epoch(model, training_data, optimizer, opt, device, smoothing):
         iter += 1
         # tqdm.write(str(loss.item()))
 
-    print('total_train loss:{},,average_train loss:{} '.format(total_loss,total_loss/optimizer.n_steps))
-    print('optimizer step:{},iter:{}'.format(optimizer.n_steps,iter))
-    return total_loss/optimizer.n_steps
+    print('total_train loss: {:8.5f},iter:{},average_train loss:{:8.5f} '.format(total_loss,iter,total_loss/iter)) #optimizer.n_steps=iter
+    return total_loss/iter
 
 def eval_epoch(model, validation_data, device, opt):
-    ''' Epoch operation in evaluation phase '''
+    ''' Epoch operation in evaluation '''
     model.eval()
     total_loss = 0
     iter=0
@@ -99,8 +95,7 @@ def eval_epoch(model, validation_data, device, opt):
 
             total_loss += loss.item()
             iter +=1
-    print('total_val loss:{} ,average_val loss:{}'.format(total_loss,total_loss/iter))
-    print('iter:{}'.format(iter))
+    print('total_val loss:{:8.5f} ,iter:{},average_val loss:{:8.5f}'.format(total_loss,iter,total_loss/iter))
     return total_loss/iter
 
 def eval_epoch1(model, validation_data, device, opt):
@@ -156,7 +151,7 @@ def eval_epoch1(model, validation_data, device, opt):
 def train(model, training_data, validation_data, optimizer, device, opt):
     """ Start training """
 
-    # Use tensorboard to plot curves, e.g. perplexity, accuracy, learning rate
+    # Use tensorboard to plot curves, e.g. loss, learning rate
     if opt.use_tb:
         print("[Info] Use Tensorboard")
         from tensorboardX import SummaryWriter
@@ -169,11 +164,11 @@ def train(model, training_data, validation_data, optimizer, device, opt):
     print('[Info] Training performance will be written to file: {} and {}'.format(log_train_file, log_valid_file))
 
     with open(log_train_file, 'w') as log_tf, open(log_valid_file, 'w') as log_vf:
-        log_tf.write('epoch,loss,lr\n')  # todo: add AUC
+        log_tf.write('epoch,loss,lr\n')
         log_vf.write('epoch,loss,lr\n')
 
     def print_performances(header, loss, start_time, lr):
-        print('  - {header:12} loss: {loss: 8.5f},  lr: {lr: 8.5f}, ' \
+        print('  - {header:12} loss: {loss: 8.5f},  lr: {lr: 8.2e}, ' \
               'elapse: {elapse:3.3f} min'.format(
             header=f"({header})", loss=loss,
             elapse=(time.time() - start_time) / 60, lr=lr))  # lr: {lr:8.5f}  8.2e
@@ -187,7 +182,7 @@ def train(model, training_data, validation_data, optimizer, device, opt):
 
         start = time.time()
         train_loss = train_epoch(
-            model, training_data, optimizer, opt, device, smoothing=opt.label_smoothing)  # todo
+            model, training_data, optimizer, opt, device)  # todo
         # Current learning rate
         lr = optimizer._optimizer.param_groups[0]['lr']
         print_performances('Training', train_loss, start, lr)
@@ -210,9 +205,9 @@ def train(model, training_data, validation_data, optimizer, device, opt):
             print(' - [Info] The checkpoint file has been updated.')
 
         with open(log_train_file, 'a') as log_tf, open(log_valid_file, 'a') as log_vf:
-            log_tf.write('{epoch},{loss: 8.5f},{lr:8.5f}\n'.format(
+            log_tf.write('{epoch},{loss: 8.5f},{lr:8.2e}\n'.format(
                 epoch=epoch_i, loss=train_loss, lr=lr))
-            log_vf.write('{epoch},{loss: 8.5f},{lr:8.5f}\n'.format(
+            log_vf.write('{epoch},{loss: 8.5f},{lr:8.2e}\n'.format(
                 epoch=epoch_i, loss=valid_loss, lr=lr))
 
         if opt.use_tb:
@@ -237,7 +232,7 @@ def main():
     ''' 
     Usage:
     python train.py
-                    -data_pkl ./data/pre_data.pkl -embs_share_weight -proj_share_weight -label_smoothing -output_dir output -warmup 128000 -epoch 150 -b 16 -use_tb -save_mode all
+                    -data_pkl ./data/pre_data.pkl  -output_dir output -epoch 150 -b 16 -use_tb -save_mode all
     '''
 
     parser = argparse.ArgumentParser()
@@ -251,31 +246,26 @@ def main():
     parser.add_argument('-b', '--batch_size', type=int, default=2048)
 
     parser.add_argument('-d_model', type=int, default=38)  # 38;8  #todo
-    parser.add_argument('-d_inner_hid', type=int, default=2048)  # 64  #todo   )2048 但是太大?  256-1585-38 *  2048
-    parser.add_argument('-d_k', type=int, default=38)  # 38;8       #64
-    parser.add_argument('-d_v', type=int, default=38)  # 38;8     #64
+    parser.add_argument('-d_inner_hid', type=int, default=2048)  # 64  #todo
+    parser.add_argument('-d_k', type=int, default=38)  
+    parser.add_argument('-d_v', type=int, default=38)  
 
-    parser.add_argument('-n_head', type=int, default=1)
-    parser.add_argument('-n_layers', type=int, default=1)  # 6
+    parser.add_argument('-n_head', type=int, default=2)
+    parser.add_argument('-n_layers', type=int, default=4)  # 6
     parser.add_argument('-warmup', '--n_warmup_steps', type=int, default=4000)
-    parser.add_argument('-lr_mul', type=float, default=2.0)  # 2.0  200比2效果好
+    parser.add_argument('-lr_mul', type=float, default=2.0)  # 2.0
     parser.add_argument('-seed', type=int, default=None)
 
     parser.add_argument('-dropout', type=float, default=0.1)
-    parser.add_argument('-embs_share_weight', action='store_true')
-    parser.add_argument('-proj_share_weight', action='store_true')
-    parser.add_argument('-scale_emb_or_prj', type=str, default='prj')
-
     parser.add_argument('-output_dir', type=str, default=None)
     parser.add_argument('-use_tb', action='store_true')
     parser.add_argument('-save_mode', type=str, choices=['all', 'best'], default='best')
 
     parser.add_argument('-no_cuda', action='store_true')
-    parser.add_argument('-label_smoothing', action='store_true')
-    parser.add_argument('-unmask', type=float, default=0.3) #add,  default input all  1500
-    parser.add_argument('-l2', type=float, default=0.0)  # add,  weight_dacay
-    parser.add_argument('-lambda_con', type=float, default=0.01)  # add,  contrast loss lambda
-    parser.add_argument('-T', type=int, default=1)  # add, the times of mask
+    parser.add_argument('-unmask', type=float, default=0.3)
+    parser.add_argument('-l2', type=float, default=0.0)  #  weight_dacay
+    parser.add_argument('-lambda_con', type=float, default=0.01)  # contrast loss lambda
+    parser.add_argument('-T', type=int, default=1)  # the times of mask
     parser.add_argument('-isContrastLoss', action='store_true')
     parser.add_argument('-isRandMask', action='store_true')
 
@@ -283,24 +273,19 @@ def main():
     # # ++++++++++++++++
     opt.d_k = opt.d_model
     opt.d_v = opt.d_model
-    # opt.seed=np.random.randint(1,10000,1)  #为了随机取seed加的
-    # opt.seed=opt.seed[0]
-    #  ++++++++++++++
-    print(opt.seed)
-    #
-    opt.cuda = not opt.no_cuda
-    opt.d_word_vec = opt.d_model  # 512
 
-    # ------自动生成输出文件夹的名字----
-    opt.fileHead = 'test_T' + str(opt.T) + '_unmask' + str(opt.unmask) + '_h' + str(opt.n_head) + 'L' + str(
+    opt.cuda = not opt.no_cuda
+    opt.d_word_vec = opt.d_model  # 512 ==>38
+
+    # ------Output fileHead----
+    opt.fileHead = 'T' + str(opt.T) + '_unmask' + str(opt.unmask) + '_h' + str(opt.n_head) + 'L' + str(
         opt.n_layers) + '_hid' + str(opt.d_inner_hid) + '_d' + str(opt.d_model) + '_b' + str(
         opt.batch_size) + '_warm' + str(opt.n_warmup_steps) + '_lrm' + str(opt.lr_mul) + '_seed' + \
-                   str(opt.seed) + '_dr' + str(opt.dropout) +'_isCL'+str(opt.isContrastLoss)+ '_lamb'+str(opt.lambda_con) #+'_ismask'+str(opt.isRandMask)  # + '_l2'+str(opt.l2)
-    if os.path.exists(os.path.join(opt.output_dir, opt.fileHead)):  # todo
+                   str(opt.seed) + '_dr' + str(opt.dropout) +'_isCL'+str(opt.isContrastLoss)+ '_lamb'+str(opt.lambda_con) +'_ismask'+str(opt.isRandMask)
+    if os.path.exists(os.path.join(opt.output_dir, opt.fileHead)):
         print('the output file is rewriting....', opt.fileHead)
     else:
         os.mkdir(os.path.join(opt.output_dir, opt.fileHead))
-        # os.mkdir(os.patoin(opt.output_dir,opt.fileHead,'model'))
         print('The output filename is generated: ', opt.fileHead)
 
     # https://pytorch.org/docs/stable/notes/randomness.html
@@ -328,16 +313,8 @@ def main():
     device = torch.device('cuda' if opt.cuda else 'cpu')
 
     # ========= Loading Dataset =========#
-
-    if all((opt.train_path, opt.val_path)):
-        raise
-        # training_data, validation_data = prepare_dataloaders_from_bpe_files(opt, device)
-    elif opt.data_pkl:
-        training_data, validation_data = prepare_dataloaders(opt, device)  # ysy:load data
-        print(training_data.__len__())  # 114  ==len(training_data)
-        print(validation_data.__len__())
-    else:
-        raise
+    training_data, validation_data = prepare_dataloaders(opt, device)
+    print("training data size:{}, validation data size:{}".format(training_data.__len__(),validation_data.__len__()))
 
     print(opt)
     log_opt_file = os.path.join(opt.output_dir, opt.fileHead, 'opt.log')
@@ -345,8 +322,6 @@ def main():
         log_f.write(str(opt))
 
     transformer = Transformer(
-        # opt.src_vocab_size,
-        # opt.trg_vocab_size,
         src_pad_idx=opt.src_pad_idx,  # 1
         trg_pad_idx=opt.trg_pad_idx,  # 1
         d_k=opt.d_k,
@@ -356,8 +331,7 @@ def main():
         d_inner=opt.d_inner_hid,
         n_layers=opt.n_layers,
         n_head=opt.n_head,
-        dropout=opt.dropout,
-        scale_emb_or_prj=opt.scale_emb_or_prj).to(device)
+        dropout=opt.dropout).to(device)
 
     optimizer = ScheduledOptim(
         optim.Adam(transformer.parameters(), betas=(0.9, 0.98), eps=1e-09),  # ,weight_decay=opt.l2
@@ -376,7 +350,7 @@ def Rand_mask(x, seed,unmask):
         shuffle_indices = torch.rand(len, len).argsort()  # b,
         unmask_ind, mask_ind = shuffle_indices[:, :unmask], shuffle_indices[:, unmask:]
         batch_ind = torch.arange(len).unsqueeze(-1)
-        x[batch_ind, unmask_ind] = 1  # pad=1 use 1 padding
+        x[batch_ind, unmask_ind] = 1  # padding=1
 
     else: #ramdomly masking number
         len = x.size(0)  # len=1585
@@ -387,9 +361,9 @@ def Rand_mask(x, seed,unmask):
         shuffle_indices = torch.rand(len, len).argsort()
         unmask_ind, mask_ind = shuffle_indices[:, :unmask], shuffle_indices[:, unmask:]
         batch_ind = torch.arange(len).unsqueeze(-1)
-        x[batch_ind, unmask_ind] = 1  # pad=1 use 1 padding
+        x[batch_ind, unmask_ind] = 1  # padding=1
     return x
-    # return x[batch_ind, unmask_ind]
+
 
 def prepare_dataloaders(opt, device):
     batch_size = opt.batch_size
@@ -402,9 +376,9 @@ def prepare_dataloaders(opt, device):
 
     if opt.isRandMask:
         print("~~~RandMask~~~~!")
-        random.seed(42)
-        random_integers = [random.randint(0, 1000) for _ in range(10)]  #[654, 114, 25, 759, 281, 250, 228
-        print(random_integers)
+        random.seed(42)  #todo
+        random_integers = [random.randint(0, 1000) for _ in range(10)]
+        print("random_integers: ",random_integers)
         for T in range(0, opt.T):
             x1 = Rand_mask(x, random_integers[T],opt.unmask)
             if T == 0:
@@ -422,15 +396,19 @@ def prepare_dataloaders(opt, device):
         print("~~~No RandMask~~~~!")
         train_x=x
         train_y=y
-    train_torch_dataset = Data.TensorDataset(train_x, train_y)
-    val_torch_dataset = Data.TensorDataset(x, y)
-    # val_torch_dataset = Data.TensorDataset(train_x, train_y)  if val use mask+loss
+
+    dataset=Data.TensorDataset(train_x, train_y)
+    #Random split dataset
+    train_size=int(len(dataset)*0.8)
+    val_size=len(dataset)-train_size
+    torch.manual_seed(42)
+    train_torch_dataset,val_torch_dataset=Data.random_split(dataset,[train_size,val_size])
+
     train_iterator = Data.DataLoader(
         dataset=train_torch_dataset,
         batch_size=batch_size,
         shuffle=True,
         num_workers=2,  # pin_memory=True
-        drop_last=True
     )
     val_iterator = Data.DataLoader(
         dataset=val_torch_dataset,
@@ -442,19 +420,12 @@ def prepare_dataloaders(opt, device):
     opt.src_pad_idx = 1
     opt.trg_pad_idx = 1
 
-    # opt.src_vocab_size = len(x)
-    # opt.trg_vocab_size = len(y)
-
     return train_iterator, val_iterator
 
 
 if __name__ == '__main__':
     main()
 
-# -data_pkl ./data/pre_data.pkl -proj_share_weight -label_smoothing -output_dir output_retry -n_head 1 -n_layer 2 -warmup 16000 -lr_mul 2.0 -epoch 25 -b 2 -seed 10 -save_mode best -use_tb
 
-
-# -data_pkl ./data/pre_data.pkl -proj_share_weight -label_smoothing -output_dir output_retry -n_head 1 -n_layer 3 -warmup 128000 -lr_mul 200 -epoch 60 -b 15 -save_mode best -use_tb -lambda 0.01
-# -data_pkl ./data/pre_data.pkl -proj_share_weight -label_smoothing -output_dir output_retry -n_head 1 -n_layer 2 -warmup 16000 -lr_mul 2.0 -epoch 35 -b 2 -seed 10 -save_mode best -use_tb
-
-#
+#-data_pkl ./data/pre_data.pkl -output_dir output -n_head 2 -n_layer 4 -warmup 128000 -lr_mul 200 -epoch 50 -b 8 -save_mode best -use_tb -seed 10 -unmask 0.3 -T 2 -isRandMask
+#                                                                      -warmup 16000 -lr_mul 2.0
