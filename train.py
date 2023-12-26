@@ -49,16 +49,15 @@ def train_epoch(model, training_data, optimizer, opt, device):
         # backward and update parameters
         if opt.isContrastLoss:
             a = torch.chunk(pred, 3, dim=0)
-            contras_loss = F.mse_loss(a[1].contiguous().view(-1), a[2].contiguous().view(-1), reduction='mean')
-            loss = F.mse_loss(a[0].contiguous().view(-1), gold, reduction='mean') + opt.lambda_con * contras_loss
+            contras_loss = F.l1_loss(a[1].contiguous().view(-1), a[2].contiguous().view(-1), reduction='mean')
+            loss = F.l1_loss(a[0].contiguous().view(-1), gold, reduction='mean') + opt.lambda_con * contras_loss
         else:
-            loss = F.mse_loss(pred.contiguous().view(-1), gold, reduction='mean')  # reduction="mean"
+            loss = F.l1_loss(pred.contiguous().view(-1), gold, reduction='mean')  # F.l1_loss,F_mse_loss
 
         loss.backward()
         optimizer.step_and_update_lr()
         total_loss += loss.item()
         iter += 1
-        # tqdm.write(str(loss.item()))
 
     print('total_train loss: {:8.5f},iter:{},average_train loss:{:8.5f} '.format(total_loss,iter,total_loss/iter)) #optimizer.n_steps=iter
     return total_loss/iter
@@ -88,65 +87,15 @@ def eval_epoch(model, validation_data, device, opt):
             # =============  loss==========================
             if opt.isContrastLoss:
                 a = torch.chunk(pred, 3, dim=0)
-                contras_loss = F.mse_loss(a[1].contiguous().view(-1), a[2].contiguous().view(-1), reduction='mean')
-                loss = F.mse_loss(a[0].contiguous().view(-1), gold, reduction='mean') + opt.lambda_con * contras_loss
+                contras_loss = F.l1_loss(a[1].contiguous().view(-1), a[2].contiguous().view(-1), reduction='mean')
+                loss = F.l1_loss(a[0].contiguous().view(-1), gold, reduction='mean') + opt.lambda_con * contras_loss
             else:
-                loss = F.mse_loss(pred.contiguous().view(-1), gold, reduction='mean')  # reduction="mean"
+                loss = F.l1_loss(pred.contiguous().view(-1), gold, reduction='mean')  # reduction="mean"
 
             total_loss += loss.item()
             iter +=1
     print('total_val loss:{:8.5f} ,iter:{},average_val loss:{:8.5f}'.format(total_loss,iter,total_loss/iter))
     return total_loss/iter
-
-def eval_epoch1(model, validation_data, device, opt):
-    ''' Epoch operation in evaluation phase '''
-    isContrastLoss1=0
-    model.eval()
-    total_loss = 0
-    iter=0
-    Trg_all = torch.zeros(1, 40)
-    Pred_all = torch.zeros(1, 38)
-    desc = '  - (Validation) '
-    with torch.no_grad():
-        for batch in tqdm(validation_data, mininterval=2, desc=desc, leave=False):
-
-            if isContrastLoss1:
-                temp = batch[0].to(device)
-                a = torch.chunk(temp, 3, dim=1)
-                src_seq = torch.cat([a[0], a[1], a[2]], 0)
-            else:
-                src_seq = batch[0].to(device)
-            gold = batch[1][:, 2:].unsqueeze(1)
-            trg_seq, gold = map(lambda x: x.to(device), [batch[1].unsqueeze(1), gold.contiguous().view(-1)])  # 转置、拉直向量  # unsqueeze:将（b,40） 改为（b,1,40)
-            if isContrastLoss1:
-                trg_seq = torch.cat([trg_seq, trg_seq, trg_seq], 0)
-
-            # forward
-            pred, *_ = model(src_seq, trg_seq)
-
-            # =============  contrast loss==========================
-            if isContrastLoss1:
-                a = torch.chunk(pred, 3, dim=0)
-                contras_loss = F.mse_loss(a[1].contiguous().view(-1), a[2].contiguous().view(-1), reduction='mean')
-                loss = F.mse_loss(a[0].contiguous().view(-1), gold, reduction='mean') + opt.lambda_con * contras_loss
-            else:
-                loss = F.mse_loss(pred.contiguous().view(-1), gold, reduction='mean')  # reduction="mean"
-
-            if isContrastLoss1:
-                Pred_all = torch.cat((Pred_all, a[0].cpu()), 0)
-            else:
-                Pred_all = torch.cat((Pred_all, pred.cpu()), 0)  # 0:按行拼接
-
-
-            Trg_all = torch.cat((Trg_all, trg_seq.squeeze(1).cpu()), 0)
-            total_loss += loss.item()
-            iter +=1
-    print('total_val loss:{} '.format(total_loss))
-    # print('optimizer step:{}'.format(optimizer.n_steps))
-    # return total_loss/optimizer.n_steps
-    print('iter:{}'.format(iter))
-    return total_loss/iter,Pred_all,Trg_all
-
 
 def train(model, training_data, validation_data, optimizer, device, opt):
     """ Start training """
@@ -427,5 +376,5 @@ if __name__ == '__main__':
     main()
 
 
-#-data_pkl ./data/pre_data.pkl -output_dir output -n_head 2 -n_layer 4 -warmup 128000 -lr_mul 200 -epoch 50 -b 8 -save_mode best -use_tb -seed 10 -unmask 0.3 -T 2 -isRandMask
+#-data_pkl ./data/pre_data.pkl -output_dir output -n_head 2 -n_layer 4 -warmup 128000 -lr_mul 200 -epoch 50 -b 8 -save_mode best -use_tb -seed 10 -unmask 0.3 -T 2 -isRandMask -isContrastLoss
 #                                                                      -warmup 16000 -lr_mul 2.0

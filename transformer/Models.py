@@ -17,7 +17,7 @@ def get_subsequent_mask(seq):
 
 
 class PositionalEncoding(nn.Module):
-
+    # -------------------- Learnabel position encoding -----------------------------------
     def __init__(self, d_hid):
         super(PositionalEncoding, self).__init__()
 
@@ -171,8 +171,6 @@ class Transformer(nn.Module):
         'To facilitate the residual connections, \
          the dimensions of all module outputs shall be the same.'
 
-
-
     def forward(self, src_seq, trg_seq):
 
         src_mask=get_pad_mask(src_seq[:,:,0], self.src_pad_idx)
@@ -183,9 +181,6 @@ class Transformer(nn.Module):
         dec_output, dec_slf_attn_list, dec_enc_attn_list= self.decoder(trg_seq, trg_mask, enc_output, src_mask,return_attns=True)
 
         seq_logit=dec_output
-        #
-        # if self.scale_prj:
-        #     seq_logit *= self.d_model ** -0.5
 
         return seq_logit.view(-1, seq_logit.size(2)),enc_slf_attn_list,dec_enc_attn_list
 

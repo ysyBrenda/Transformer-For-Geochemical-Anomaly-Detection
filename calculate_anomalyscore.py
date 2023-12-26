@@ -132,6 +132,6 @@ def main():
     pred_file = './output/pred.csv'
     Trg=np.loadtxt(trg_file, delimiter=",")
     Pred=np.loadtxt(pred_file, delimiter=",")
-    calculate(Pred, Trg, epoch_i=0)
+    calculate(Pred, Trg, epoch_i=0,raw_data='data/pos_feature.csv',Au_data='data/Au.csv')
 if __name__ == '__main__':
     main()

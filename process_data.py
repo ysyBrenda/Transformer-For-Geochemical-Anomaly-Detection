@@ -7,10 +7,7 @@ import numpy as np
 import dill as pickle
 
 
-
-
 def main():
-
     '''
     pos_feature file like: 
     =========  =========  =========  =========
@@ -30,8 +27,8 @@ def main():
     L = len(pos)
     x = []
     y = []
-    x_range = max(pos[:, 0]) - min(pos[:, 0])   #83000
-    y_range = max(pos[:, 1]) - min(pos[:, 1])   #102000
+    x_range = max(pos[:, 0]) - min(pos[:, 0])  # 83000
+    y_range = max(pos[:, 1]) - min(pos[:, 1])  # 102000
 
     for i in range(0, L):
         # coordinates difference, scaled!
@@ -47,7 +44,5 @@ def main():
     print("[Info] Data have saved!")
 
 
-
 if __name__ == '__main__':
     main()
-
