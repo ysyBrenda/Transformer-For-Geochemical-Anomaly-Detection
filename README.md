@@ -6,7 +6,7 @@ _An end-to-end Transformer for geochemical anomaly detection._ by Shuyan Yu,Hao 
 	
 ## Hardware requirements
 - two Nvidia RTX 3090Ti GPUs or higher
-- 
+
 ## Dependencies required
 
 > + Ubuntu 16.04
