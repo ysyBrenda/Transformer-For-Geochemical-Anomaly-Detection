@@ -26,8 +26,6 @@ class PositionalEncoding(nn.Module):
 
     def forward(self, x):
         pos,x=x[:,:,0:2],x[:,:,2:]
-        pos[:,:,0]=pos[:,:,0]
-        pos[:,:,1]=pos[:,:,1]
 
         self.pos_table = self.linear_p(pos)
         return x + self.pos_table[:, :x.size(1)].clone().detach(), self.pos_table.clone().detach()
